@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Halas játék</title>
+<style>
+:root{--bg:#eef6fb;--fg:#12324a;--card:#ffffff;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1a26;--fg:#dcecf7;--card:#14293a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b1a26;--fg:#dcecf7;--card:#14293a;color-scheme:dark}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;display:flex;flex-direction:column;align-items:center;padding:12px}
+h1{font-size:1.3rem;margin:4px 0 8px}
+#wrap{position:relative;width:100%;max-width:900px}
+canvas{width:100%;height:auto;display:block;border-radius:12px;cursor:crosshair;touch-action:none;background:#0a5f8f}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#box{background:var(--card);color:var(--fg);padding:20px 28px;border-radius:14px;text-align:center;max-width:80%;pointer-events:auto;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+#box h2{margin:0 0 8px}
+#box{max-height:90%;overflow:auto;box-sizing:border-box}
+#box p button{padding:4px 12px;margin:0 0 0 6px;font-size:.85rem}
+#box p{margin:6px 0}
+button{font-size:1rem;padding:10px 22px;border:0;border-radius:8px;background:#1c8adb;color:#fff;cursor:pointer;margin-top:8px}
+.legend{margin-top:8px;font-size:.9rem;text-align:center}
+.g{color:#2e9e4f;font-weight:bold}.r{color:#d23b3b;font-weight:bold}.y{color:#b8920a;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>🐟 Halas játék</h1>
+<div id="wrap">
+<canvas id="c" width="900" height="560"></canvas>
+<div id="msg"><div id="box"></div></div>
+</div>
+<div class="legend"><span class="g">Zöld</span> hal: megeheted · <span class="r">piros</span> hal: menekülj! · <span class="y">sárga</span>: ugyanakkora · 🎣 horog és lila medúza: kerüld! · ❤ ⚡ 🐚 bónuszok: gyűjtsd!</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),W=900,H=560;
+const box=document.getElementById('box'),msg=document.getElementById('msg');
+const WIN=100;
+const ranks=[[0,'Halacska'],[26,'Kis hal'],[38,'Nagy hal'],[55,'Cápajelölt'],[75,'Ragadozó'],[WIN,'Az óceán királya']];
+let best=0;try{best=+localStorage.getItem('halBest')||0}catch(e){}
+let pearls=0,owned=[0],skin=0,bonusLife=0;try{const s=JSON.parse(localStorage.getItem('halSave')||'{}');pearls=s.pearls||0;owned=s.owned||[0];skin=s.skin||0;bonusLife=s.bl||0}catch(e){}
+function save(){try{localStorage.setItem('halSave',JSON.stringify({pearls,owned,skin,bl:bonusLife}))}catch(e){}}
+const skins=[['Narancs','#ff9f1c',0],['Kék','#4aa8ff',30],['Rózsaszín','#ff6fae',80],['Lila','#a56bff',150],['Arany','#ffd23f',300]];
+function shop(){let h='<h2>🪪 Bolt</h2><p>Gyöngyeid: <b>'+pearls+'</b></p>';
+skins.forEach((s,i)=>{const o=owned.includes(i);h+='<p><span style="color:'+s[1]+'">●</span> '+s[0]+' <button data-s="'+i+'">'+(skin===i?'Kiválasztva':o?'Választ':s[2]+' gyöngy')+'</button></p>'});
+h+='<p>❤ Extra élet induláskor ('+bonusLife+'/2) <button data-s="L">'+(bonusLife>=2?'Kész':(100+bonusLife*150)+' gyöngy')+'</button></p><button id="back">Vissza</button>';
+show(h);
+box.querySelectorAll('button[data-s]').forEach(b=>b.onclick=()=>{const k=b.dataset.s;
+if(k==='L'){const c=100+bonusLife*150;if(bonusLife<2&&pearls>=c){pearls-=c;bonusLife++}}
+else{const i=+k;if(owned.includes(i))skin=i;else if(pearls>=skins[i][2]){pearls-=skins[i][2];owned.push(i);skin=i}}
+save();shop()});
+document.getElementById('back').onclick=menu}
+let state='menu',hooks=[],hookT=8,jel=[],jelT=10,items=[],itemT=12,lives=3,inv=0,boost=0,mega=0,combo=0,comboT=0,p,fish,bubbles,score,rank,flash,flashT,mouse={x:W/2,y:H/2},last=0;
+function rankOf(r){let n=ranks[0][1],i=0;ranks.forEach((k,j)=>{if(r>=k[0]){n=k[1];i=j}});return [n,i]}
+function reset(){p={x:W/2,y:H/2,r:18,dir:1};fish=[];hooks=[];hookT=8;jel=[];jelT=10;items=[];itemT=12;lives=3+bonusLife;inv=0;boost=0;mega=0;combo=0;comboT=0;score=0;rank=0;flash='';flashT=0;
+bubbles=Array.from({length:25},()=>({x:Math.random()*W,y:Math.random()*H,s:Math.random()*3+1}));
+for(let i=0;i<10;i++)spawn(true)}
+function spawn(init){
+const q=Math.random();let r;
+if(q<.45)r=p.r*(.35+Math.random()*.55);else if(q<.82)r=p.r*(1.15+Math.random()*.85);else r=p.r*(.9+Math.random()*.2);
+r=Math.max(7,Math.min(130,r));
+const left=Math.random()<.5;
+let x=init?Math.random()*W:(left?-r*2:W+r*2),y=r+Math.random()*(H-2*r);
+if(init&&Math.hypot(x-p.x,y-p.y)<150){x=left?30:W-30}
+const sp=(40+Math.random()*60)*(1.3-Math.min(r,100)/160)*(1+rank*.12);
+fish.push({x,y,r,vx:left?sp:-sp,ph:Math.random()*6.28,base:y})}
+function start(){reset();state='play';msg.style.display='none'}
+function show(html){box.innerHTML=html;msg.style.display='flex'}
+function menu(){show('<h2>🐟 Halas játék</h2><p>Kis hal vagy a nagy óceánban. Az egérrel irányítasz.</p><p>Edd meg a kisebb halakat, hogy nőj – de a nagyok elől menekülj!</p><p>Cél: nőj akkora, hogy <b>az óceán királya</b> légy.</p><p>Vigyázz a <b>horgokra</b> is: a ⚠ jel mutatja, hol jön le egy!</p><p>Minden játék végén <b>gyöngyt</b> kapsz, amit a boltban új halszínekre és extra életre válthatsz.</p><p>3 életed van. Gyűjtsd a bónuszokat: ❤ élet, ⚡ gyorsaság, 🐚 szuper harapás. A medúza is fáj!</p><button id="go">Indítás</button> <button id="sh">🪪 Bolt</button>');document.getElementById('sh').onclick=shop;
+document.getElementById('go').onclick=start}
+function end(win,cause){state=win?'win':'dead';
+if(score>best){best=score;try{localStorage.setItem('halBest',best)}catch(e){}}
+const gain=Math.floor(score/15)+rankOf(p.r)[1]*10+(win?100:0);pearls+=gain;save();const ni=skins.findIndex((s,i)=>!owned.includes(i));
+const t=win?'<h2>👑 Az óceán királya vagy!</h2><p>Megnyerted a játékot, nincs nálad nagyobb hal.</p>':(cause==='hook'?'<h2>🎣 Kifogtak!</h2><p>Egy horog elkapott.</p>':'<h2>💀 Vége a játéknak!</h2><p>Elfogytak az életeid.</p>');
+show(t+'<p>Pontszám: <b>'+score+'</b> · Rekord: <b>'+best+'</b></p><p>Rangod: '+rankOf(p.r)[0]+'</p><p>🪪 +'+gain+' gyöngy (összesen: '+pearls+')</p>'+(ni>=0?'<p>Következő hal a boltban: '+skins[ni][0]+' ('+Math.max(0,skins[ni][2]-pearls)+' gyöngy hiányzik)</p>':'')+'<button id="go">Új játék</button> <button id="sh">🪪 Bolt</button>');document.getElementById('sh').onclick=shop;
+document.getElementById('go').onclick=start}
+function hit(c){if(inv>0)return;lives--;inv=2;combo=0;if(lives<=0){end(false,c);return}flash=c==='hook'?'Elkapott a horog!':c==='jelly'?'Megcsípett a medúza!':'Megharaptak!';flashT=1.5}
+function setMouse(e){const b=cv.getBoundingClientRect();const t=e.touches?e.touches[0]:e;
+mouse.x=(t.clientX-b.left)*W/b.width;mouse.y=(t.clientY-b.top)*H/b.height}
+cv.addEventListener('mousemove',setMouse);
+cv.addEventListener('touchstart',e=>{setMouse(e);e.preventDefault()},{passive:false});
+cv.addEventListener('touchmove',e=>{setMouse(e);e.preventDefault()},{passive:false});
+function update(dt){
+const dx=mouse.x-p.x,dy=mouse.y-p.y,d=Math.hypot(dx,dy);
+const maxSp=(260-Math.min(p.r,80)*0.9)*(boost>0?1.5:1);
+if(d>4){const s=Math.min(maxSp,d*4);p.x+=dx/d*s*dt;p.y+=dy/d*s*dt}
+if(Math.abs(dx)>6)p.dir=dx>0?1:-1;
+p.x=Math.max(p.r,Math.min(W-p.r,p.x));p.y=Math.max(p.r*.6,Math.min(H-p.r*.6,p.y));
+bubbles.forEach(b=>{b.y-=b.s*12*dt;if(b.y<-5){b.y=H+5;b.x=Math.random()*W}});
+for(let i=fish.length-1;i>=0;i--){const f=fish[i];
+f.ph+=dt*2;f.x+=f.vx*dt;f.y=Math.max(f.r*.6,Math.min(H-f.r*.6,f.base+Math.sin(f.ph)*12));
+if(f.x<-f.r*3||f.x>W+f.r*3){fish.splice(i,1);continue}
+const dist=Math.hypot(f.x-p.x,(f.y-p.y)*1.2);
+if(dist<(p.r+f.r)*.7){
+if(p.r*(mega>0?1.6:1)>f.r*1.05){p.r+=f.r*.06;combo=comboT>0?combo+1:1;comboT=2.2;score+=Math.round(f.r)*Math.min(5,combo);fish.splice(i,1);
+const nr=rankOf(p.r)[1];if(nr>rank){rank=nr;flash='Új rang: '+ranks[nr][1]+'!';flashT=2.5}
+if(p.r>=WIN){end(true);return}
+}else if(f.r>p.r*1.05){hit('fish');if(state!=='play')return}}}
+inv=Math.max(0,inv-dt);boost=Math.max(0,boost-dt);mega=Math.max(0,mega-dt);comboT-=dt;if(comboT<=0)combo=0;
+jelT-=dt;if(jelT<=0&&rank>=1){jel.push({x:60+Math.random()*(W-120),y:H+40,r:20+Math.random()*10,vy:-(30+Math.random()*25),ph:Math.random()*6});jelT=Math.max(3,9-rank*1.2)*(.7+Math.random()*.6)}
+for(let i=jel.length-1;i>=0;i--){const j=jel[i];j.y+=j.vy*dt;j.ph+=dt*4;j.x+=Math.sin(j.ph*.5)*20*dt;if(j.y<-60){jel.splice(i,1);continue}
+if(Math.hypot(p.x-j.x,p.y-j.y)<p.r*.6+j.r*.9){hit('jelly');if(state!=='play')return}}
+itemT-=dt;if(itemT<=0){items.push({x:50+Math.random()*(W-100),y:50+Math.random()*(H-100),type:['life','boost','mega'][Math.floor(Math.random()*3)],t:9});itemT=9+Math.random()*7}
+for(let i=items.length-1;i>=0;i--){const m=items[i];m.t-=dt;if(m.t<=0){items.splice(i,1);continue}
+if(Math.hypot(p.x-m.x,p.y-m.y)<p.r+16){if(m.type==='life'){if(lives<5)lives++;else score+=50;flash='+1 élet!'}else if(m.type==='boost'){boost=6;flash='Gyorsaság!'}else{mega=6;flash='Szuper harapás: nagyobbat is megehetsz!'}flashT=2;items.splice(i,1)}}
+hookT-=dt;
+if(hookT<=0){const n=rank>=3&&Math.random()<.5?2:1;for(let k=0;k<n;k++){const hx=Math.random()<.6?Math.max(20,Math.min(W-20,p.x+(Math.random()-.5)*200)):20+Math.random()*(W-40);hooks.push({x:hx,y:-20,ty:Math.max(120,Math.min(H-60,p.y+(Math.random()-.5)*150)),st:'warn',t:1.1})}hookT=Math.max(2,7-rank*1.1)*(.7+Math.random()*.6)}
+for(let i=hooks.length-1;i>=0;i--){const h=hooks[i];
+if(h.st==='warn'){h.t-=dt;if(h.t<=0)h.st='down'}
+else{if(h.st==='down'){h.y+=280*dt;if(h.y>=h.ty){h.y=h.ty;h.st='stay';h.t=1.5+Math.random()}}
+else if(h.st==='stay'){h.t-=dt;if(h.t<=0)h.st='up'}
+else{h.y-=200*dt;if(h.y<-30){hooks.splice(i,1);continue}}
+if(Math.hypot(p.x-(h.x+8),p.y-(h.y+4))<p.r*.6+9){hit('hook');if(state!=='play')return}}}
+if(flashT>0)flashT-=dt;
+while(fish.length<Math.min(24,10+Math.floor(p.r/6)))spawn(false)}
+function drawFish(x,y,r,dir,col,eyeCol){
+ctx.save();ctx.translate(x,y);ctx.scale(dir,1);
+ctx.fillStyle=col;
+ctx.beginPath();ctx.ellipse(0,0,r,r*.62,0,0,6.283);ctx.fill();
+ctx.beginPath();ctx.moveTo(-r*.8,0);ctx.lineTo(-r*1.5,-r*.55);ctx.lineTo(-r*1.5,r*.55);ctx.closePath();ctx.fill();
+ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(r*.5,-r*.15,r*.2,0,6.283);ctx.fill();
+ctx.fillStyle=eyeCol||'#000';ctx.beginPath();ctx.arc(r*.55,-r*.15,r*.1,0,6.283);ctx.fill();
+ctx.restore()}
+function draw(){
+const g=ctx.createLinearGradient(0,0,0,H);const dk=Math.min(rank,4)*.12;g.addColorStop(0,'rgb('+Math.round(26*(1-dk*2))+','+Math.round(143*(1-dk))+','+Math.round(201*(1-dk))+')');g.addColorStop(1,'#04243a');
+ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ctx.fillStyle='rgba(255,255,255,.25)';
+bubbles.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,b.s,0,6.283);ctx.fill()});
+fish.forEach(f=>{const ep=p.r*(mega>0?1.6:1);const col=f.r<ep*.95?'#3fbf62':(f.r>ep*1.05?'#e0453f':'#e8c63a');
+drawFish(f.x,f.y,f.r,f.vx>0?1:-1,col)});
+hooks.forEach(h=>{if(h.st==='warn'){ctx.globalAlpha=.4+.4*Math.sin(h.t*20);ctx.fillStyle='#ff4040';ctx.font='bold 26px system-ui,Arial';ctx.textAlign='center';ctx.fillText('⚠',h.x,34);ctx.globalAlpha=1;return}
+ctx.strokeStyle='#e8e8e8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(h.x,0);ctx.lineTo(h.x,h.y);ctx.stroke();
+ctx.lineWidth=4;ctx.beginPath();ctx.arc(h.x+9,h.y,9,Math.PI,Math.PI*.35,true);ctx.stroke();ctx.lineWidth=1});
+jel.forEach(j=>{ctx.fillStyle='rgba(200,120,255,.8)';ctx.beginPath();ctx.arc(j.x,j.y,j.r,Math.PI,0);ctx.fill();ctx.strokeStyle='rgba(200,120,255,.8)';ctx.lineWidth=3;for(let k=-2;k<=2;k++){ctx.beginPath();ctx.moveTo(j.x+k*j.r*.4,j.y);ctx.quadraticCurveTo(j.x+k*j.r*.4+Math.sin(j.ph+k)*6,j.y+j.r*.8,j.x+k*j.r*.4,j.y+j.r*1.6);ctx.stroke()}ctx.lineWidth=1});
+items.forEach(m=>{ctx.globalAlpha=m.t<3?.4+.4*Math.sin(m.t*12):1;ctx.font='28px system-ui,Arial';ctx.textAlign='center';ctx.fillText(m.type==='life'?'❤️':m.type==='boost'?'⚡':'🐚',m.x,m.y+10);ctx.globalAlpha=1});
+if(inv<=0||Math.floor(inv*10)%2)drawFish(p.x,p.y,p.r,p.dir,mega>0?'#fff27a':skins[skin][1]);
+ctx.fillStyle='#fff';ctx.font='bold 18px system-ui,Arial';ctx.textAlign='left';
+ctx.fillText('Pontszám: '+score,14,26);
+ctx.fillText('Rang: '+rankOf(p.r)[0],14,50);ctx.fillText('Életek: '+'❤'.repeat(lives),14,74);if(combo>1)ctx.fillText('Kombó x'+Math.min(5,combo),14,98);if(boost>0)ctx.fillText('⚡ '+Math.ceil(boost)+' mp',14,122);if(mega>0)ctx.fillText('🐚 '+Math.ceil(mega)+' mp',14,146);
+ctx.textAlign='right';ctx.fillText('Rekord: '+best,W-14,26);ctx.fillText('🪪 '+pearls+' (+'+Math.floor(score/15)+')',W-14,70);
+const pr=Math.min(1,(p.r-18)/(WIN-18));
+ctx.fillStyle='rgba(255,255,255,.25)';ctx.fillRect(W-214,38,200,10);
+ctx.fillStyle='#ffd23f';ctx.fillRect(W-214,38,200*pr,10);
+if(flashT>0){ctx.textAlign='center';ctx.font='bold 34px system-ui,Arial';ctx.fillStyle='#ffd23f';ctx.fillText(flash,W/2,90)}}
+function loop(t){const dt=Math.min(.05,(t-last)/1000||0);last=t;
+if(state==='play')update(dt);draw();requestAnimationFrame(loop)}
+reset();menu();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
